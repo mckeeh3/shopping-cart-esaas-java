@@ -1,9 +1,16 @@
 package io.shopping.cart.entity;
 
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import com.akkaserverless.javasdk.eventsourcedentity.EventSourcedEntityContext;
 import com.google.protobuf.Empty;
+import com.google.protobuf.Timestamp;
 
 import io.shopping.cart.CartApi;
 
@@ -124,6 +131,24 @@ public class ShoppingCart extends AbstractShoppingCart {
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.AddLineItem command) {
+    if (state.getCheckedOutUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is already checked out"));
+    }
+    if (state.getDeletedUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is deleted"));
+    }
+    if (command.getCustomerId().isEmpty()) {
+      return Optional.of(effects().error("Customer ID is required"));
+    }
+    if (command.getProductId().isEmpty()) {
+      return Optional.of(effects().error("Product ID is required"));
+    }
+    if (command.getProductName().isEmpty()) {
+      return Optional.of(effects().error("Product name is required"));
+    }
+    if (command.getQuantity() <= 0) {
+      return Optional.of(effects().error("Quantity must be greater than 0"));
+    }
     return Optional.empty();
   }
 
@@ -152,6 +177,9 @@ public class ShoppingCart extends AbstractShoppingCart {
   }
 
   private Optional<Effect<CartApi.ShoppingCart>> reject(CartEntity.CartState state, CartApi.GetShoppingCart command) {
+    if (state.getCartId().isEmpty()) {
+      return Optional.of(effects().error("Shopping cart is empty"));
+    }
     return Optional.empty();
   }
 
@@ -202,7 +230,17 @@ public class ShoppingCart extends AbstractShoppingCart {
   }
 
   private static CartEntity.ItemAdded event(CartEntity.CartState state, CartApi.AddLineItem command) {
-    return null;
+    var lineItem = CartEntity.LineItem
+        .newBuilder()
+        .setProductId(command.getProductId())
+        .setProductName(command.getProductName())
+        .setQuantity(command.getQuantity())
+        .build();
+    return CartEntity.ItemAdded.newBuilder()
+        .setCartId(command.getCartId())
+        .setCustomerId(command.getCustomerId())
+        .setLineItem(lineItem)
+        .build();
   }
 
   private static CartEntity.ItemChanged event(CartEntity.CartState state, CartApi.ChangeLineItem command) {
@@ -230,14 +268,44 @@ public class ShoppingCart extends AbstractShoppingCart {
   }
 
   private static CartApi.ShoppingCart toApi(CartEntity.CartState state) {
-    return null;
+    return CartApi.ShoppingCart
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .setCustomerId(state.getCustomerId())
+        .setCheckedOutUtc(toUtc(state.getCheckedOutUtc()))
+        .setShippedUtc(toUtc(state.getShippedUtc()))
+        .setDeliveredUtc(toUtc(state.getDeliveredUtc()))
+        .setDeletedUtc(toUtc(state.getDeletedUtc()))
+        .addAllLineItems(toApi(state.getLineItemsList()))
+        .build();
+  }
+
+  private static List<CartApi.LineItem> toApi(List<CartEntity.LineItem> lineItems) {
+    return lineItems.stream().map(
+        lineItem -> CartApi.LineItem
+            .newBuilder()
+            .setProductId(lineItem.getProductId())
+            .setProductName(lineItem.getProductName())
+            .setQuantity(lineItem.getQuantity())
+            .build())
+        .collect(Collectors.toList());
+  }
+
+  private static String toUtc(Timestamp timestamp) {
+    if (timestamp.getSeconds() == 0) {
+      return "";
+    }
+    var dateFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'");
+    return dateFormat.format(new Date(timestamp.getSeconds() * 1000 + timestamp.getNanos() / 1000000));
   }
 
   static class Cart {
     CartEntity.CartState state;
+    final Map<String, CartEntity.LineItem> lineItems = new LinkedHashMap<>();
 
     public Cart(CartEntity.CartState state) {
       this.state = state;
+      state.getLineItemsList().forEach(lineItem -> lineItems.put(lineItem.getProductId(), lineItem));
     }
 
     static Cart fromState(CartEntity.CartState state) {
@@ -245,6 +313,24 @@ public class ShoppingCart extends AbstractShoppingCart {
     }
 
     Cart handle(CartEntity.ItemAdded event) {
+      lineItems.computeIfPresent(event.getLineItem().getProductId(),
+          (productId, lineItem) -> lineItem
+              .toBuilder()
+              .setQuantity(lineItem.getQuantity() + event.getLineItem().getQuantity())
+              .build());
+      lineItems.computeIfAbsent(event.getLineItem().getProductId(),
+          productId -> CartEntity.LineItem
+              .newBuilder()
+              .setProductId(event.getLineItem().getProductId())
+              .setProductName(event.getLineItem().getProductName())
+              .setQuantity(event.getLineItem().getQuantity())
+              .build());
+      state = state.toBuilder()
+          .setCartId(event.getCartId())
+          .setCustomerId(event.getCustomerId())
+          .clearLineItems()
+          .addAllLineItems(lineItems.values())
+          .build();
       return this;
     }
 
