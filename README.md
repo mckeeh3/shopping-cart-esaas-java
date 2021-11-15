@@ -1,5 +1,26 @@
 # shopping-cart-esaas-java
 
+This is an example implementation of an Akka Serverless
+[Event-Sourced Entity](https://developer.lightbend.com/docs/akka-serverless/java/value-entity.html) - Event-sourced-as-a-Service written in Java.
+
+You can `git checkout` different phases of the development process. Use `git --no-pager log --oneline` to view the available tags.
+
+~~~bash
+git --no-pager log --oneline
+eb2bccf (HEAD -> master, tag: step-7, origin/master) implement all business logic
+8388f21 (tag: step-6) implement addLineItem and getShoppingCart
+1a6d6c4 (tag: step-5) add vscode rest client for testing service API
+bdfe74e (tag: step-4) stub business logic methods
+b8169b9 (tag: step-3) add shopping cart proto files
+54b5761 (tag: step-2) mvn compile using default proto files
+da11bc4 (tag: step-1) create initial project using mvn archetype
+~~~
+
+To checkout the project at a specific tag:
+
+~~~bash
+git checkout step-4
+~~~
 
 ## Designing
 
