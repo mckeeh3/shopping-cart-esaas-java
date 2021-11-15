@@ -1,6 +1,7 @@
 package io.shopping.cart.entity;
 
 import java.text.SimpleDateFormat;
+import java.time.Instant;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -22,11 +23,7 @@ import io.shopping.cart.CartApi;
 /** An event sourced entity. */
 public class ShoppingCart extends AbstractShoppingCart {
 
-  @SuppressWarnings("unused")
-  private final String entityId;
-
   public ShoppingCart(EventSourcedEntityContext context) {
-    this.entityId = context.entityId();
   }
 
   @Override
@@ -153,26 +150,83 @@ public class ShoppingCart extends AbstractShoppingCart {
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.ChangeLineItem command) {
+    if (state.getCartId().isEmpty()) {
+      return Optional.of(effects().error("Shopping cart is empty"));
+    }
+    if (state.getCheckedOutUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is already checked out"));
+    }
+    if (state.getDeletedUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is deleted"));
+    }
+    if (command.getProductId().isEmpty()) {
+      return Optional.of(effects().error("Product id is required"));
+    }
+    if (command.getQuantity() <= 0) {
+      return Optional.of(effects().error("Quantity must be greater than 0"));
+    }
     return Optional.empty();
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.RemoveLineItem command) {
+    if (state.getCartId().isEmpty()) {
+      return Optional.of(effects().error("Shopping cart is empty"));
+    }
+    if (state.getCheckedOutUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is already checked out"));
+    }
+    if (state.getDeletedUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is deleted"));
+    }
+    if (command.getProductId().isEmpty()) {
+      return Optional.of(effects().error("Product id is required"));
+    }
     return Optional.empty();
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.CheckoutShoppingCart command) {
+    if (state.getCartId().isEmpty()) {
+      return Optional.of(effects().error("Shopping cart is empty"));
+    }
+    if (state.getDeletedUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is deleted"));
+    }
     return Optional.empty();
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.ShippedShoppingCart command) {
+    if (state.getDeletedUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is deleted"));
+    }
+    if (state.getCheckedOutUtc().getSeconds() == 0) {
+      return Optional.of(effects().error("Shopping cart is not checked out"));
+    }
     return Optional.empty();
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.DeliveredShoppingCart command) {
+    if (state.getDeletedUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Shopping cart is deleted"));
+    }
+    if (state.getCheckedOutUtc().getSeconds() == 0) {
+      return Optional.of(effects().error("Shopping cart is not checked out"));
+    }
+    if (state.getShippedUtc().getSeconds() == 0) {
+      return Optional.of(effects().error("Shopping cart is not shipped"));
+    }
     return Optional.empty();
   }
 
   private Optional<Effect<Empty>> reject(CartEntity.CartState state, CartApi.DeleteShoppingCart command) {
+    if (state.getDeliveredUtc().getSeconds() != 0) {
+      return Optional.of(effects().error("Cannot delete delivered order"));
+    }
+    if (state.getShippedUtc().getSeconds() != 0) {
+      return Optional.of(effects().error("Cannot delete shipped order"));
+    }
+    if (state.getCheckedOutUtc().getSeconds() > 0) {
+      return Optional.of(effects().error("Cannot delete checked out order"));
+    }
     return Optional.empty();
   }
 
@@ -244,27 +298,48 @@ public class ShoppingCart extends AbstractShoppingCart {
   }
 
   private static CartEntity.ItemChanged event(CartEntity.CartState state, CartApi.ChangeLineItem command) {
-    return null;
+    return CartEntity.ItemChanged
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .setProductId(command.getProductId())
+        .setQuantity(command.getQuantity())
+        .build();
   }
 
   private static CartEntity.ItemRemoved event(CartEntity.CartState state, CartApi.RemoveLineItem command) {
-    return null;
+    return CartEntity.ItemRemoved
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .setProductId(command.getProductId())
+        .build();
   }
 
   private static CartEntity.CartCheckedOut event(CartEntity.CartState state, CartApi.CheckoutShoppingCart command) {
-    return null;
+    return CartEntity.CartCheckedOut
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .build();
   }
 
   private static CartEntity.CartShipped event(CartEntity.CartState state, CartApi.ShippedShoppingCart command) {
-    return null;
+    return CartEntity.CartShipped
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .build();
   }
 
   private static CartEntity.CartDelivered event(CartEntity.CartState state, CartApi.DeliveredShoppingCart command) {
-    return null;
+    return CartEntity.CartDelivered
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .build();
   }
 
   private static CartEntity.CartDeleted event(CartEntity.CartState state, CartApi.DeleteShoppingCart command) {
-    return null;
+    return CartEntity.CartDeleted
+        .newBuilder()
+        .setCartId(state.getCartId())
+        .build();
   }
 
   private static CartApi.ShoppingCart toApi(CartEntity.CartState state) {
@@ -335,31 +410,71 @@ public class ShoppingCart extends AbstractShoppingCart {
     }
 
     Cart handle(CartEntity.ItemChanged event) {
+      lineItems.computeIfPresent(event.getProductId(),
+          (productId, lineItem) -> lineItem
+              .toBuilder()
+              .setQuantity(event.getQuantity())
+              .build());
+      state = state.toBuilder()
+          .clearLineItems()
+          .addAllLineItems(lineItems.values())
+          .build();
       return this;
     }
 
     Cart handle(CartEntity.ItemRemoved event) {
+      lineItems.remove(event.getProductId());
+      state = state
+          .toBuilder()
+          .clearLineItems()
+          .addAllLineItems(lineItems.values())
+          .build();
       return this;
     }
 
     Cart handle(CartEntity.CartCheckedOut event) {
+      state = state
+          .toBuilder()
+          .setCheckedOutUtc(timestampNow())
+          .build();
       return this;
     }
 
     Cart handle(CartEntity.CartShipped event) {
+      state = state
+          .toBuilder()
+          .setShippedUtc(timestampNow())
+          .build();
       return this;
     }
 
     Cart handle(CartEntity.CartDelivered event) {
+      state = state
+          .toBuilder()
+          .setDeliveredUtc(timestampNow())
+          .build();
       return this;
     }
 
     Cart handle(CartEntity.CartDeleted event) {
+      state = state
+          .toBuilder()
+          .setDeletedUtc(timestampNow())
+          .build();
       return this;
     }
 
     CartEntity.CartState toState() {
       return state;
+    }
+
+    static Timestamp timestampNow() {
+      var now = Instant.now();
+      return Timestamp
+          .newBuilder()
+          .setSeconds(now.getEpochSecond())
+          .setNanos(now.getNano())
+          .build();
     }
   }
 }
