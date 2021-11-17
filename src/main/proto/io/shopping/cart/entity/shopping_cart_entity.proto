@@ -54,7 +54,10 @@ message CartDelivered {
   google.protobuf.Timestamp delivered_utc = 2;
 }
 
-message CartDeleted { string cart_id = 1; }
+message CartDeleted {
+  string cart_id = 1;
+  google.protobuf.Timestamp deleted_utc = 2;
+}
 
 message CartState {
   string cart_id = 1;

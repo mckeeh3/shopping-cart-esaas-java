@@ -318,6 +318,7 @@ public class ShoppingCart extends AbstractShoppingCart {
     return CartEntity.CartCheckedOut
         .newBuilder()
         .setCartId(state.getCartId())
+        .setCheckedOutUtc(Cart.timestampNow())
         .build();
   }
 
@@ -325,6 +326,7 @@ public class ShoppingCart extends AbstractShoppingCart {
     return CartEntity.CartShipped
         .newBuilder()
         .setCartId(state.getCartId())
+        .setShippedUtc(Cart.timestampNow())
         .build();
   }
 
@@ -332,6 +334,7 @@ public class ShoppingCart extends AbstractShoppingCart {
     return CartEntity.CartDelivered
         .newBuilder()
         .setCartId(state.getCartId())
+        .setDeliveredUtc(Cart.timestampNow())
         .build();
   }
 
@@ -339,6 +342,7 @@ public class ShoppingCart extends AbstractShoppingCart {
     return CartEntity.CartDeleted
         .newBuilder()
         .setCartId(state.getCartId())
+        .setDeletedUtc(Cart.timestampNow())
         .build();
   }
 
